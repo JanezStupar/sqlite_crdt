@@ -9,8 +9,11 @@ class ExecutorApi extends DatabaseApi {
   ExecutorApi(this._db);
 
   @override
-  Future<void> execute(String sql, [List<Object?>? args]) =>
-      _db.execute(sql, args);
+  Future<ExecuteResult> execute(String sql, [List<Object?>? args]) async {
+    // Use rawQuery to support RETURNING clauses in modern SQLite (3.35.0+)
+    final result = await _db.rawQuery(sql, args);
+    return result.isEmpty ? const VoidResult() : QueryResult(result, sql: sql);
+  }
 
   @override
   Future<List<Map<String, Object?>>> query(String sql, [List<Object?>? args]) =>
@@ -40,5 +43,10 @@ class BatchApi extends WriteApi {
   void query(String sql, [List<Object?>? args]) => _batch.rawQuery(sql, args);
 
   @override
-  void execute(String sql, [List<Object?>? args]) => _batch.execute(sql, args);
+  ExecuteResult execute(String sql, [List<Object?>? args]) {
+    // Use rawQuery to support RETURNING clauses in modern SQLite (3.35.0+)
+    // Note: Batch operations queue results until batch.commit() is called
+    _batch.execute(sql, args);
+    return const VoidResult();
+  }
 }

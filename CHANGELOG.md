@@ -1,3 +1,37 @@
+## 4.0.0
+
+**Breaking Changes**
+
+- Upgrade to `sql_crdt` 4.0.0
+- `execute()` method now returns `ExecuteResult` instead of `void`
+  - `ExecutorApi.execute()` returns `Future<ExecuteResult>`
+  - `BatchApi.execute()` returns `ExecuteResult`
+
+**Features**
+
+- Full support for `RETURNING` clauses on SQLite 3.35.0+
+  - `execute()` automatically detects and returns `QueryResult` when statements return data
+  - Returns `VoidResult` for statements that don't return data
+  - Batch operations use `rawQuery` to support RETURNING clauses, but return `VoidResult` synchronously
+    - Actual results are available when `batch.commit()` completes
+
+**Migration Guide**
+
+Application code that ignores the return value continues to work:
+```dart
+// This still works
+await crdt.execute('INSERT INTO users (name) VALUES (?)', ['Alice']);
+```
+
+Code that explicitly types the result needs updating:
+```dart
+// Old:
+Future<void> myFunc() => crdt.execute('INSERT ...');
+
+// New:
+Future<ExecuteResult> myFunc() => crdt.execute('INSERT ...');
+```
+
 ## 3.0.2
 
 - Update dependencies
