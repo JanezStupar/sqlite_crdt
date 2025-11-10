@@ -85,13 +85,14 @@ class SqliteCrdt extends SqlCrdt {
   Future<void> close() => _db.close();
 
   @override
-  Future<Iterable<String>> getTables() async => (await _db.rawQuery('''
+  Future<Iterable<String>> getTables({String? schema}) async =>
+      (await _db.rawQuery('''
         SELECT name FROM sqlite_schema
         WHERE type ='table' AND name NOT LIKE 'sqlite_%'
       ''')).map((e) => e['name'] as String);
 
   @override
-  Future<Iterable<String>> getTableKeys(String table) async =>
+  Future<Iterable<String>> getTableKeys(String table, {String? schema}) async =>
       (await _db.rawQuery('''
          SELECT name FROM pragma_table_info(?1)
          WHERE pk > 0
