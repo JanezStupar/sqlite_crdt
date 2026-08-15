@@ -6,12 +6,12 @@ repository: https://github.com/cachapa/sqlite_crdt
 issue_tracker: https://github.com/cachapa/sqlite_crdt/issues
 
 environment:
-  sdk: ^3.0.0
+  sdk: ^3.12.0
 
 dependencies:
-  sqflite_common: ^2.5.4+5
-  sqflite_common_ffi: ^2.3.4
-  sqflite_common_ffi_web: ^0.4.5+3
+  sqflite_common: ^2.5.11
+  sqflite_common_ffi: ^2.4.2
+  sqflite_common_ffi_web: ^1.1.2
   sql_crdt: ^4.0.0
 
 dependency_overrides:

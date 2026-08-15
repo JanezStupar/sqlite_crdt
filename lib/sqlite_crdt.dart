@@ -16,7 +16,8 @@ export 'package:sql_crdt/sql_crdt.dart';
 class SqliteCrdt extends SqlCrdt {
   final Database _db;
 
-  SqliteCrdt._(this._db) : super(ExecutorApi(_db));
+  SqliteCrdt._(this._db, {super.onlyTables, super.excludeTables})
+    : super(ExecutorApi(_db));
 
   /// Open or create a SQLite container as a SqlCrdt instance.
   ///
@@ -28,8 +29,18 @@ class SqliteCrdt extends SqlCrdt {
     int? version,
     FutureOr<void> Function(CrdtTableExecutor db, int version)? onCreate,
     FutureOr<void> Function(CrdtTableExecutor db, int from, int to)? onUpgrade,
-  }) =>
-      _open(path, false, singleInstance, version, onCreate, onUpgrade);
+    Set<String>? onlyTables,
+    Set<String>? excludeTables,
+  }) => _open(
+    path,
+    false,
+    singleInstance,
+    version,
+    onCreate,
+    onUpgrade,
+    onlyTables,
+    excludeTables,
+  );
 
   /// Open a transient SQLite in memory.
   /// Useful for testing or temporary sessions.
@@ -38,8 +49,18 @@ class SqliteCrdt extends SqlCrdt {
     int? version,
     FutureOr<void> Function(CrdtTableExecutor db, int version)? onCreate,
     FutureOr<void> Function(CrdtTableExecutor db, int from, int to)? onUpgrade,
-  }) =>
-      _open(null, true, singleInstance, version, onCreate, onUpgrade);
+    Set<String>? onlyTables,
+    Set<String>? excludeTables,
+  }) => _open(
+    null,
+    true,
+    singleInstance,
+    version,
+    onCreate,
+    onUpgrade,
+    onlyTables,
+    excludeTables,
+  );
 
   static Future<SqliteCrdt> _open(
     String? path,
@@ -48,17 +69,31 @@ class SqliteCrdt extends SqlCrdt {
     int? version,
     FutureOr<void> Function(CrdtTableExecutor crdt, int version)? onCreate,
     FutureOr<void> Function(CrdtTableExecutor crdt, int from, int to)?
-        onUpgrade,
+    onUpgrade,
+    Set<String>? onlyTables,
+    Set<String>? excludeTables,
   ) async {
     if (sqliteCrdtIsWeb && !inMemory && path!.contains('/')) {
       path = path.substring(path.lastIndexOf('/') + 1);
     }
     assert(inMemory || path!.isNotEmpty);
-    final databaseFactory =
-        sqliteCrdtIsWeb ? databaseFactoryFfiWeb : databaseFactoryFfi;
+    final databaseFactory = sqliteCrdtIsWeb
+        ? databaseFactoryFfiWeb
+        : databaseFactoryFfi;
 
-    if (!sqliteCrdtIsWeb && sqliteCrdtIsLinux) {
-      await databaseFactory.setDatabasesPath('.');
+    if (!inMemory) {
+      path = sqliteCrdtResolvePath(path!);
+    }
+
+    bool tableFilter(String table, {String? schema}) {
+      final qualifiedName = schema == null ? table : '$schema.$table';
+      if (onlyTables != null && onlyTables.isNotEmpty) {
+        return onlyTables.contains(table) || onlyTables.contains(qualifiedName);
+      }
+      return excludeTables == null ||
+          excludeTables.isEmpty ||
+          (!excludeTables.contains(table) &&
+              !excludeTables.contains(qualifiedName));
     }
 
     final db = await databaseFactory.openDatabase(
@@ -68,16 +103,25 @@ class SqliteCrdt extends SqlCrdt {
         version: version,
         onCreate: onCreate == null
             ? null
-            : (db, version) =>
-                onCreate(CrdtTableExecutor(ExecutorApi(db)), version),
+            : (db, version) => onCreate(
+                CrdtTableExecutor(ExecutorApi(db), tableFilter: tableFilter),
+                version,
+              ),
         onUpgrade: onUpgrade == null
             ? null
-            : (db, from, to) =>
-                onUpgrade(CrdtTableExecutor(ExecutorApi(db)), from, to),
+            : (db, from, to) => onUpgrade(
+                CrdtTableExecutor(ExecutorApi(db), tableFilter: tableFilter),
+                from,
+                to,
+              ),
       ),
     );
 
-    final crdt = SqliteCrdt._(db);
+    final crdt = SqliteCrdt._(
+      db,
+      onlyTables: onlyTables,
+      excludeTables: excludeTables,
+    );
     await crdt.init();
     return crdt;
   }
@@ -93,11 +137,17 @@ class SqliteCrdt extends SqlCrdt {
 
   @override
   Future<Iterable<String>> getTableKeys(String table, {String? schema}) async =>
-      (await _db.rawQuery('''
+      (await _db.rawQuery(
+        '''
          SELECT name FROM pragma_table_info(?1)
          WHERE pk > 0
-       ''', [table])).map((e) => e['name'] as String);
+       ''',
+        [table],
+      )).map((e) => e['name'] as String);
 
-  BatchExecutor batch() =>
-      BatchExecutor(_db.batch(), canonicalTime.increment());
+  BatchExecutor batch() => BatchExecutor(
+    _db.batch(),
+    canonicalTime.increment(),
+    tableFilter: tracksTable,
+  );
 }
