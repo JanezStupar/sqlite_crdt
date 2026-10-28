@@ -11,7 +11,7 @@ import 'package:sqflite_common/src/database_mixin.dart';
 import 'package:sqflite_common/src/transaction.dart';
 import 'package:sql_crdt/sql_crdt.dart';
 
-class ExecutorApi extends DatabaseApi {
+class ExecutorApi extends DatabaseApi implements MergeTransactionApi {
   final DatabaseExecutor _db;
 
   ExecutorApi(this._db);
@@ -26,6 +26,13 @@ class ExecutorApi extends DatabaseApi {
   @override
   Future<List<Map<String, Object?>>> query(String sql, [List<Object?>? args]) =>
       _db.rawQuery(sql, args);
+
+  @override
+  Future<Iterable<String>> getTableKeys(String table, {String? schema}) async =>
+      (await _db.rawQuery(
+        'SELECT name FROM pragma_table_info(?1) WHERE pk > 0',
+        [table],
+      )).map((row) => row['name'] as String);
 
   @override
   Future<void> transaction(

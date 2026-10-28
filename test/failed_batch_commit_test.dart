@@ -62,6 +62,52 @@ Future<_Fixture> _fixture() async {
 }
 
 void main() {
+  for (final rollback in [false, true]) {
+    test(
+      'transaction merge ${rollback ? 'rolls back' : 'commits'} with local writes',
+      () async {
+        final fixture = await _fixture();
+        final before = await fixture.rows();
+        final canonicalBefore = fixture.db.canonicalTime;
+        final changed = Map<String, Object?>.from(before.first);
+        changed['value'] = 'remote';
+        changed['hlc'] = Hlc.parse(
+          changed['hlc']! as String,
+        ).apply(nodeId: 'synthetic-remote').increment();
+        final expectedError = StateError('abort after merge');
+        final operation = fixture.db
+            .transaction((transaction) async {
+              expect(transaction, isA<MergeCrdtExecutor>());
+              await transaction.execute(
+                "UPDATE items SET value='local' WHERE id='protected'",
+              );
+              await (transaction as MergeCrdtExecutor).mergeIncoming(
+                fixture.db,
+                {
+                  'items': [changed],
+                },
+              );
+              final inside = await transaction.query(
+                'SELECT * FROM items ORDER BY id',
+              );
+              expect(inside.map((row) => row['value']), ['remote', 'local']);
+              if (rollback) throw expectedError;
+            })
+            .timeout(const Duration(seconds: 3));
+        if (rollback) {
+          await expectLater(operation, throwsA(same(expectedError)));
+          expect(await fixture.rows(), before);
+          expect(fixture.db.canonicalTime, canonicalBefore);
+        } else {
+          await operation;
+          final after = await fixture.rows();
+          expect(after.map((row) => row['value']), ['remote', 'local']);
+          expect(after.first['hlc'], changed['hlc'].toString());
+        }
+      },
+    );
+  }
+
   for (final route in ['merge', 'batch', 'transaction']) {
     test(
       '$route COMMIT BUSY rolls back and releases queries and locks',
