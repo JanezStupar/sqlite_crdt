@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:sqflite_common/sqlite_api.dart';
 // ignore: implementation_imports
+import 'package:sqflite_common/src/batch.dart';
+// ignore: implementation_imports
+import 'package:sqflite_common/src/exception.dart';
+// ignore: implementation_imports
 import 'package:sqflite_common/src/database_mixin.dart';
 // ignore: implementation_imports
 import 'package:sqflite_common/src/transaction.dart';
@@ -76,9 +80,62 @@ class ExecutorApi extends DatabaseApi {
     FutureOr<void> Function(WriteApi api) actions,
   ) async {
     final batch = _db.batch();
-    actions(BatchApi(batch));
-    await batch.commit();
+    await actions(BatchApi(batch));
+    await commitBatch(batch);
   }
+}
+
+/// Commit a database-owned batch with terminal cleanup under its database lock.
+/// Transaction-bound batches leave commit and rollback to their existing owner.
+Future<List<Object?>> commitBatch(Batch batch) async {
+  if (batch is! SqfliteDatabaseBatch) return batch.commit();
+
+  final database = batch.database as SqfliteDatabaseMixin;
+  database.checkNotClosed();
+  return database.txnWriteSynchronized(database.txn, (existing) async {
+    if (existing != null) {
+      return database.txnApplyBatch(existing as SqfliteTransaction, batch);
+    }
+
+    final transaction = await database.beginTransaction();
+    var statementsCompleted = false;
+    try {
+      try {
+        final result = await database.txnApplyBatch(transaction, batch);
+        statementsCompleted = true;
+        transaction.successful = true;
+        return result;
+      } finally {
+        // Preserve sqflite's statement-error rollback and successful COMMIT.
+        await database.endTransaction(transaction);
+      }
+    } catch (error, stackTrace) {
+      if (!statementsCompleted ||
+          (error is SqfliteDatabaseException && error.transactionClosed)) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+
+      // COMMIT closed the Dart transaction, but SQLite can still hold it open.
+      // Bypass the closed-object check using this transaction's own identity,
+      // while retaining the database lock so another owner cannot intervene.
+      try {
+        await database.invokeExecute<dynamic>(
+          transaction,
+          'ROLLBACK',
+          null,
+          inTransactionChange: false,
+        );
+      } on DatabaseException catch (rollbackError, rollbackStackTrace) {
+        if (!_isNoTransactionActive(rollbackError)) {
+          Error.throwWithStackTrace(
+            _TransactionRecoveryException(error, rollbackError),
+            rollbackStackTrace,
+          );
+        }
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  });
 }
 
 bool _isNoTransactionActive(DatabaseException error) =>

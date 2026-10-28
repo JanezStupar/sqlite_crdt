@@ -14,5 +14,5 @@ class BatchExecutor extends CrdtWriteExecutor {
     : super(BatchApi(_batch), hlc);
 
   /// Commit this batch atomically. See Sqlite documentation for details.
-  Future<List<Object?>> commit() => _batch.commit();
+  Future<List<Object?>> commit() => commitBatch(_batch);
 }
